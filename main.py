@@ -1,7 +1,9 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 import os
 import shutil
+import time
+import threading
 
 class FileCopyApp:
     def __init__(self, master):
@@ -22,7 +24,18 @@ class FileCopyApp:
         tk.Button(master, text="Browse", command=self.browse_destination).grid(row=1, column=2)
         
         # Copy button
-        tk.Button(master, text="Copy File", command=self.copy_file).grid(row=2, column=1)
+        tk.Button(master, text="Copy File", command=self.start_copy).grid(row=2, column=1)
+        
+        # Progress bar
+        self.progress = ttk.Progressbar(master, orient="horizontal", length=300, mode="determinate")
+        self.progress.grid(row=3, column=0, columnspan=3, pady=10)
+        
+        # Status labels
+        self.time_label = tk.Label(master, text="Estimated time remaining: ")
+        self.time_label.grid(row=4, column=0, columnspan=3)
+        
+        self.size_label = tk.Label(master, text="Remaining file size: ")
+        self.size_label.grid(row=5, column=0, columnspan=3)
 
     def browse_source(self):
         filename = filedialog.askopenfilename(initialdir="/Volumes")
@@ -32,7 +45,7 @@ class FileCopyApp:
         dirname = filedialog.askdirectory(initialdir="/Volumes")
         self.dest_path.set(dirname)
 
-    def copy_file(self):
+    def start_copy(self):
         source = self.source_path.get()
         destination = self.dest_path.get()
         
@@ -40,11 +53,60 @@ class FileCopyApp:
             messagebox.showerror("Error", "Please select both source and destination.")
             return
         
+        # Start copying in a separate thread
+        threading.Thread(target=self.copy_file, args=(source, destination)).start()
+
+    def copy_file(self, source, destination):
         try:
-            shutil.copy2(source, destination)
+            file_size = os.path.getsize(source)
+            basename = os.path.basename(source)
+            dest_path = os.path.join(destination, basename)
+            
+            # Open source and destination files
+            with open(source, 'rb') as src, open(dest_path, 'wb') as dst:
+                copied = 0
+                start_time = time.time()
+                
+                while True:
+                    buf = src.read(4096)  # Read in 4KB chunks
+                    if not buf:
+                        break
+                    dst.write(buf)
+                    copied += len(buf)
+                    
+                    # Update progress
+                    progress = (copied / file_size) * 100
+                    self.progress['value'] = progress
+                    
+                    # Update time and size remaining
+                    elapsed_time = time.time() - start_time
+                    speed = copied / elapsed_time if elapsed_time > 0 else 0
+                    remaining_size = file_size - copied
+                    remaining_time = remaining_size / speed if speed > 0 else 0
+                    
+                    self.master.after(0, self.update_labels, remaining_time, remaining_size)
+                    
+                    self.master.update_idletasks()
+
             messagebox.showinfo("Success", f"File copied successfully to {destination}")
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
+        finally:
+            self.progress['value'] = 0
+            self.time_label.config(text="Estimated time remaining: ")
+            self.size_label.config(text="Remaining file size: ")
+
+    def update_labels(self, remaining_time, remaining_size):
+        self.time_label.config(text=f"Estimated time remaining: {remaining_time:.2f} seconds")
+        self.size_label.config(text=f"Remaining file size: {self.format_size(remaining_size)}")
+
+    @staticmethod
+    def format_size(size):
+        # Convert bytes to human-readable format
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size < 1024.0:
+                return f"{size:.2f} {unit}"
+            size /= 1024.0
 
 if __name__ == "__main__":
     root = tk.Tk()
